@@ -24,7 +24,7 @@ exports.register = async (req, res) => {
         res.status(201).send("User created");
 
     } catch (err) {
-        res.status(500).send("Server error");
+        next(err);
     }
 };
 
@@ -41,7 +41,7 @@ exports.login = async (req, res) => {
         const match = await bcrypt.compare(password, user.password);
 
         if (!match) {
-            return res.status(400).send("Wrong credentials");
+            throw Object.assign(new Error("Invalid username or password"), { status: 400 });
         }
 
         const accessToken = jwt.sign(
@@ -55,49 +55,111 @@ exports.login = async (req, res) => {
             process.env.REFRESH_TOKEN_SECRET
         );
 
-        user.refreshTokens.push(refreshToken);
-        await user.save();
+        const hashedToken = await bcrypt.hash(refreshToken, 10);
 
-        res.json({ accessToken, refreshToken });
+user.refreshTokens.push(hashedToken);
+await user.save();
+
+        res.cookie("accessToken", accessToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Strict",
+    maxAge: 15 * 60 * 1000
+});
+
+res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Strict"
+});
+
+res.json({ success: true });
 
     } catch (err) {
-        res.status(500).send("Server error");
+        next(err);
     }
 };
 
-exports.refreshToken = async (req, res) => {
-    const { token } = req.body;
+exports.refreshToken = async (req, res, next) => {
+    try {
+        const token = req.cookies.refreshToken;
+        if (!token) throw { status: 401, message: "Unauthorized" };
 
-    if (!token) return res.sendStatus(401);
+        const user = await User.findOne();
+        if (!user) throw { status: 403 };
 
-    const user = await User.findOne({ refreshTokens: token });
+        let matchedToken = null;
 
-    if (!user) return res.sendStatus(403);
+        for (let t of user.refreshTokens) {
+            const match = await bcrypt.compare(token, t);
+            if (match) {
+                matchedToken = t;
+                break;
+            }
+        }
 
-    jwt.verify(token, process.env.REFRESH_TOKEN_SECRET, (err, decoded) => {
-        if (err) return res.sendStatus(403);
+        if (!matchedToken) throw { status: 403 };
+
+        jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
+
+        // 🔥 ROTATION
+        user.refreshTokens = user.refreshTokens.filter(t => t !== matchedToken);
+
+        const newRefreshToken = jwt.sign(
+            { id: user._id },
+            process.env.REFRESH_TOKEN_SECRET
+        );
+
+        const hashed = await bcrypt.hash(newRefreshToken, 10);
+        user.refreshTokens.push(hashed);
+
+        await user.save();
 
         const accessToken = jwt.sign(
             { id: user._id, username: user.username },
             process.env.ACCESS_TOKEN_SECRET,
-            { expiresIn: '15m' }
+            { expiresIn: "15m" }
         );
 
-        res.json({ accessToken });
-    });
+        res.cookie("accessToken", accessToken, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "Strict"
+        });
+
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "Strict"
+        });
+
+        res.json({ success: true });
+
+    } catch (err) {
+        next(err);
+    }
 };
 
-exports.logout = async (req, res) => {
-    const { token } = req.body;
+exports.logout = async (req, res, next) => {
+    try {
+        const token = req.cookies.refreshToken;
 
-    const user = await User.findOne({ refreshTokens: token });
+        if (!token) return res.sendStatus(204);
 
-    if (!user) return res.sendStatus(204);
+        const user = await User.findOne();
 
-    user.refreshTokens = user.refreshTokens.filter(t => t !== token);
-    await user.save();
+        user.refreshTokens = [];
 
-    res.sendStatus(204);
+        await user.save();
+
+        res.clearCookie("accessToken");
+        res.clearCookie("refreshToken");
+
+        res.sendStatus(204);
+
+    } catch (err) {
+        next(err);
+    }
 };
 
 exports.dashboard = (req, res) => {
