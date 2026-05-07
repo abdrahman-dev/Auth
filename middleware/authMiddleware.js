@@ -1,17 +1,32 @@
-const jwt = require('jsonwebtoken');
+import jwt from 'jsonwebtoken';
 
-function authenticateToken(req, res, next) {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+export const authMiddleware = (req, res, next) => {
+    try {
+        const token = req.cookies?.accessToken || req.headers.authorization?.split(' ')[1];
 
-    if (!token) return res.sendStatus(401);
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: "No access token provided"
+            });
+        }
 
-    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, user) => {
-        if (err) return res.sendStatus(403);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = { userId: decoded.userId };
 
-        req.user = user;
         next();
-    });
-}
 
-module.exports = authenticateToken;
+    } catch (error) {
+        if (error.name === 'TokenExpiredError') {
+            return res.status(401).json({
+                success: false,
+                message: "Access token expired"
+            });
+        }
+
+        return res.status(401).json({
+            success: false,
+            message: "Invalid access token"
+        });
+    }
+};

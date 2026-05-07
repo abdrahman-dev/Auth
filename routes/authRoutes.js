@@ -1,14 +1,28 @@
-const express = require('express');
+import express from 'express';
+import { validate } from '../middleware/validate.js';
+import { authMiddleware } from '../middleware/authMiddleware.js';
+import { registerSchema, loginSchema } from '../controllers/authValidation.js'; 
+import {
+    getApiStatus,
+    registerUser,
+    loginUser,
+    logoutUser,
+    refreshTokenController,
+    getMe
+} from '../controllers/authController.js'; 
+import { 
+    authLimiter,
+    registerLimiter,
+    refreshLimiter
+} from '../middleware/rateLimiter.js';
+
 const router = express.Router();
-const authController = require('../controllers/authController.js');
-const authenticateToken = require('../middleware/authMiddleware.js');
-const validate = require('../middleware/validate');
-const { registerSchema, loginSchema } = require('../controllers/authValidation.js');
 
-router.post('/register', validate(registerSchema), authController.register);
-router.post('/login', validate(loginSchema), authController.login);
-router.get('/dashboard', authenticateToken, authController.dashboard);
-router.post('/refresh-token', authController.refreshToken);
-router.delete('/logout', authController.logout);
+router.get('/', getApiStatus);
+router.post('/register', registerLimiter, validate(registerSchema), registerUser);
+router.post('/login', authLimiter, validate(loginSchema), loginUser);
+router.post('/logout', logoutUser);
+router.post('/refresh', refreshLimiter, refreshTokenController);
+router.get('/me', authMiddleware, getMe);
 
-module.exports = router;
+export default router;
