@@ -1,7 +1,16 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import userModel from '../model/userModel.js';
-import refreshTokenModel from '../model/refreshToken.js';
+import userModel from '../../model/userModel.js';
+import refreshTokenModel from '../../model/refreshToken.js';
+import {
+    accessCookieOptions,
+    refreshCookieOptions
+} from '../../config/cookie.js';
+import {
+    generateAccessToken,
+    generateRefreshToken
+} from '../../utils/authTokens.js';
+import { errorHandler } from '../../middleware/errorHandler.js';
 
 // Returns basic API status to confirm the server is running
 export const getApiStatus = (req, res) => {
@@ -56,18 +65,9 @@ export const refreshTokenController = async (req, res) => {
         }
 
         // Generate new access token
-        const newAccessToken = jwt.sign(
-            { userId: user._id },
-            process.env.ACCESS_TOKEN_SECRET,
-            { expiresIn: '15m' }
-        );
+        const newAccessToken = generateAccessToken(user);
 
-        res.cookie('accessToken', newAccessToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 15 * 60 * 1000
-        });
+        res.cookie('accessToken', newAccessToken, accessCookieOptions);
 
         return res.status(200).json({
             success: true,
@@ -105,17 +105,9 @@ export const registerUser = async (req, res) => {
         });
         await user.save();
 
-        const accessToken = jwt.sign(
-            { userId: user._id },
-            process.env.ACCESS_TOKEN_SECRET,
-            { expiresIn: '15m' }
-        );
+        const accessToken = generateAccessToken(user);
 
-        const refreshToken = jwt.sign(
-            { userId: user._id },
-            process.env.REFRESH_TOKEN_SECRET,
-            { expiresIn: '7d' }
-        );
+        const refreshToken = generateRefreshToken(user);
 
         await refreshTokenModel.create({
             userId: user._id,
@@ -123,19 +115,9 @@ export const registerUser = async (req, res) => {
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         });
 
-        res.cookie('accessToken', accessToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 15 * 60 * 1000
-        });
+        res.cookie('accessToken', accessToken, accessCookieOptions);
 
-        res.cookie('refreshToken', refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 7 * 24 * 60 * 60 * 1000
-        });
+        res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
         return res.status(201).json({
             success: true,
@@ -177,17 +159,8 @@ export const loginUser = async (req, res) => {
         }
 
         // Generate tokens
-        const accessToken = jwt.sign(
-            { userId: user._id },
-            process.env.ACCESS_TOKEN_SECRET,
-            { expiresIn: '15m' }
-        );
-
-        const refreshToken = jwt.sign(
-            { userId: user._id },
-            process.env.REFRESH_TOKEN_SECRET,
-            { expiresIn: '7d' }
-        );
+        const accessToken = generateAccessToken(user);
+        const refreshToken = generateRefreshToken(user);
 
         // Save refresh token to database
         await refreshTokenModel.create({
@@ -196,19 +169,9 @@ export const loginUser = async (req, res) => {
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         });
 
-        // Set cookies
-        const cookieOptions = {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-        };
+        res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
-        res.cookie('refreshToken', refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 7 * 24 * 60 * 60 * 1000
-        });
+        res.cookie('accessToken', accessToken, accessCookieOptions);
 
         return res.status(200).json({
             success: true,
@@ -238,17 +201,8 @@ export const logoutUser = async (req, res) => {
             );
         }
 
-        res.clearCookie('accessToken', {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-        });
-
-        res.clearCookie('refreshToken', {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-        });
+        res.clearCookie('accessToken', accessCookieOptions);
+        res.clearCookie('refreshToken', refreshCookieOptions);
 
         return res.status(200).json({
             success: true,

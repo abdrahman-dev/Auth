@@ -30,7 +30,11 @@ app.use('/api/auth', authRoutes);
 app.use(errorHandler);
 
 // Establish connection to MongoDB database
-connectDB();
+try {
+    connectDB();
+} catch (error) {
+    console.error('Failed to connect to MongoDB:', error);
+}
 
 // Start the Express server on specified port
 app.listen(port, () => {

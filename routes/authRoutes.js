@@ -1,7 +1,7 @@
 import express from 'express';
 import { validate } from '../middleware/validate.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
-import { registerSchema, loginSchema } from '../controllers/authValidation.js'; 
+import { registerSchema, loginSchema } from '../controllers/auth/authValidation.js'; 
 import {
     getApiStatus,
     registerUser,
@@ -9,7 +9,7 @@ import {
     logoutUser,
     refreshTokenController,
     getMe
-} from '../controllers/authController.js'; 
+} from '../controllers/auth/authController.js'; 
 import { 
     authLimiter,
     registerLimiter,
