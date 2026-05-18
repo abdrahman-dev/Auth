@@ -1,3 +1,5 @@
+import { env } from '../config/env.js';
+
 // Simple logger utility
 export const logger = {
     info: (message, data = {}) => {
@@ -10,7 +12,7 @@ export const logger = {
         console.error(`[ERROR] ${new Date().toISOString()} - ${message}`, error || '');
     },
     debug: (message, data = {}) => {
-        if (process.env.NODE_ENV === 'development') {
+        if (env.NODE_ENV === 'development') {
             console.debug(`[DEBUG] ${new Date().toISOString()} - ${message}`, data);
         }
     }

@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import 'dotenv/config';
 import connectDB from './model/mongodb.js';
 import { globalLimiter } from './middleware/rateLimiter.js';
+import { env } from './config/env.js';
 
 // Import router for authentication endpoints (login, register, logout, refresh)
 import authRoutes from './routes/authRoutes.js'
@@ -12,7 +13,7 @@ import errorHandler from './middleware/errorHandler.js';
 
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = env.PORT;
 
 // Middleware setup for JSON parsing, CORS with frontend, and cookie handling
 app.use(express.json());

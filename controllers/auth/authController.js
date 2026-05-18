@@ -10,7 +10,7 @@ import {
     generateAccessToken,
     generateRefreshToken
 } from '../../utils/authTokens.js';
-import { errorHandler } from '../../middleware/errorHandler.js';
+import { env } from '../../config/env.js';
 
 // Returns basic API status to confirm the server is running
 export const getApiStatus = (req, res) => {
@@ -44,7 +44,7 @@ export const refreshTokenController = async (req, res) => {
         // 1) Verify the refresh token
         let decoded;
         try {
-            decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+            decoded = jwt.verify(refreshToken, env.REFRESH_TOKEN_SECRET);
         } catch (error) {
             return res.status(401).json({
                 success: false,
@@ -72,12 +72,14 @@ export const refreshTokenController = async (req, res) => {
                 { userId: decoded.userId },
                 { isRevoked: true }
             );
-        } 
 
-        return res.status(401).json({
-            success: false,
-            message: "Session invalidated due to suspicious activity, please login again"
-        });
+            console.warn(`[SECURITY] Refresh token reuse detected for userId: ${decoded.userId}. All sessions revoked.`);
+
+            return res.status(401).json({
+                success: false,
+                message: "Session invalidated due to suspicious activity, please login again"
+            });
+        }
 
         // Check if user exists
         const user = await userModel.findById(decoded.userId);
@@ -130,17 +132,6 @@ export const registerUser = async (req, res) => {
             });
         }
 
-        // Generate OTP for account verification and save to DB with expiry for development testing (in production, you would send this OTP to the user's email)
-
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpire = Date.now() + 10 * 60 * 1000; 
-
-        user.verifyOTP = otp;
-        user.verifyOTPExpire = otpExpire;
-        await user.save();
-
-        console.log(`[DEV] Account verification OTP for ${email}: ${otp}`);
-
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const user = await new userModel({
@@ -149,6 +140,16 @@ export const registerUser = async (req, res) => {
             password: hashedPassword
         });
         await user.save();
+
+        // Generate OTP for account verification and save to DB with expiry
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpire = Date.now() + 10 * 60 * 1000;
+
+        user.verifyOTP = otp;
+        user.verifyOTPExpire = otpExpire;
+        await user.save();
+
+        console.log(`[DEV] Account verification OTP for ${email}: ${otp}`);
 
         const accessToken = generateAccessToken(user);
 

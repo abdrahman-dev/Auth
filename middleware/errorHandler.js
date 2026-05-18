@@ -1,3 +1,5 @@
+import { env } from '../config/env.js';
+
 class AppError extends Error {
     constructor(message, statusCode) {
         super(message);
@@ -51,7 +53,7 @@ const errorHandler = (err, req, res, next) => {
     }
 
     // Log unexpected errors
-    if (statusCode === 500 && process.env.NODE_ENV === 'development') {
+    if (statusCode === 500 && env.NODE_ENV === 'development') {
         console.error('UNEXPECTED ERROR:', err);
     }
 
@@ -59,7 +61,7 @@ const errorHandler = (err, req, res, next) => {
         success: false,
         message,
         ...(errors && { errors }),
-        ...(process.env.NODE_ENV === 'development' && statusCode === 500 && {
+        ...(env.NODE_ENV === 'development' && statusCode === 500 && {
             stack: err.stack
         })
     });

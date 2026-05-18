@@ -30,7 +30,7 @@ router.post('/login', authLimiter, validate(loginSchema), loginUser);
 router.post('/logout', logoutUser);
 router.post('/refresh', refreshLimiter, refreshTokenController);
 router.get('/me', authMiddleware, getMe);
-router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), forgotPassword);
+router.post('/forgot-password', resetPasswordLimiter, validate(forgotPasswordSchema), forgotPassword);
 router.post('/reset-password', resetPasswordLimiter, validate(resetPasswordSchema), resetPassword);
 router.post('/verify-email', authLimiter, validate(verifyEmailSchema), verifyEmail);
 router.post('/resend-otp', resetPasswordLimiter, validate(resendOTPSchema), resendOTP);

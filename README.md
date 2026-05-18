@@ -10,11 +10,16 @@ A production-ready REST API for authentication built with Node.js, Express 5, an
 - **Server-side revocation** — Refresh tokens stored in MongoDB with `isRevoked` flag; logout actually kills the session
 - **Centralized error handling** — Custom `AppError` class catches Zod (422), JWT (401), and Mongoose (400/409) errors in one place
 - **Zod validation** — All inputs validated before hitting the database with per-field error messages
-- **Four-tier rate limiting** — Global (100/15min), login (5/15min), register (10/hour), refresh (20/15min)
+- **Five-tier rate limiting** — Global (100/15min), login (5/15min), register (10/hour), refresh (20/15min), password reset (5/30min)
 - **Password hashing** — bcryptjs with 10 salt rounds
 - **TTL index** — Expired refresh tokens auto-purged by MongoDB, no cleanup scripts needed
 - **Modular utilities** — Token generation, cookie options, and validation schemas extracted into reusable modules
 - **Logger utility** — Structured logging with `[INFO]`, `[WARN]`, `[ERROR]`, `[DEBUG]` levels
+- **Email verification via OTP** — Required before login; OTP generated on registration with 10-minute expiry
+- **Password reset via OTP** — 10-minute expiry OTP sent on forgot-password request
+- **Token rotation on refresh** — Old refresh token revoked, new pair issued; sliding session window
+- **Refresh token reuse detection** — Revokes all user sessions on suspicious token reuse
+- **Change password** — Authenticated endpoint for password updates
 
 ## Tech Stack
 
@@ -110,6 +115,11 @@ npm start
 | POST | `/api/auth/logout` | No | Revoke session |
 | POST | `/api/auth/refresh` | No | Issue new access token |
 | GET | `/api/auth/me` | Yes | Get current user profile |
+| POST | `/api/auth/forgot-password` | No | Request password reset OTP |
+| POST | `/api/auth/reset-password` | No | Reset password using OTP |
+| POST | `/api/auth/verify-email` | No | Verify email using OTP |
+| POST | `/api/auth/resend-otp` | No | Resend verification OTP |
+| POST | `/api/auth/change-password` | Yes | Change password (authenticated) |
 
 ## Authentication Flow
 
@@ -159,13 +169,32 @@ LOGOUT
 ─────────────────────────────────────────────────
 Server marks refresh token as isRevoked: true in DB
 Clears both cookies
+
+
+EMAIL VERIFICATION
+─────────────────────────────────────────────────
+Register → OTP generated and saved to user document
+POST /verify-email { email, otp }
+→ OTP verified → isAccountVerified: true
+→ Login now allowed
+
+
+PASSWORD RESET
+─────────────────────────────────────────────────
+POST /forgot-password { email }
+→ OTP generated (10 min expiry)
+→ console.log in dev / nodemailer in production
+POST /reset-password { email, otp, newPassword }
+→ OTP verified → password hashed and updated
 ```
 
 ## Security Highlights
 
 - **httpOnly cookies** — Tokens inaccessible to XSS attacks
 - **Server-side revocation** — Refresh tokens tracked in MongoDB with `isRevoked` flag; logout invalidates the session server-side
-- **Rate limiting** — Three dedicated limiters protect login (5/15min), register (10/hour), and refresh (20/15min) endpoints
+- **Token rotation** — Every refresh revokes the old token and issues a new pair; sliding session window
+- **Reuse detection** — If a revoked token is reused, all user sessions are revoked as a security precaution
+- **Rate limiting** — Five dedicated limiters protect login (5/15min), register (10/hour), refresh (20/15min), and password reset (5/30min) endpoints
 - **Password security** — bcryptjs hashing (10 rounds), never stored or returned in plaintext
 - **Input validation** — Zod schemas enforce format requirements (uppercase, lowercase, numbers, special chars) before any DB query
 - **TTL index** — MongoDB auto-deletes expired refresh tokens, no manual cleanup
@@ -184,10 +213,10 @@ All errors flow through a single centralized handler that distinguishes between:
 
 ## Planned Features
 
-- Email verification flow (OTP fields already in user model, nodemailer in deps)
-- Forgot / reset password (validation schemas already written)
+- ~~Email verification flow (OTP fields already in user model, nodemailer in deps)~~ ✅
+- ~~Forgot / reset password (validation schemas already written)~~ ✅
 - verifyAccessToken / verifyRefreshToken utilities
-- Env validation at startup (`config/env.js`)
+- ~~Env validation at startup (`config/env.js`)~~ ✅
 - Test suite (Jest + supertest)
 
 ## License
