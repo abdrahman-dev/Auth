@@ -52,11 +52,32 @@ export const refreshTokenController = async (req, res) => {
             });
         }
         // 2) Check DB for the refresh token isRevoked or expired
-        const storedToken = await refreshTokenModel.findOne({ token: refreshToken, userId: decoded.userId, isRevoked: false , expiresAt : { $gt: new Date() } });
+        const storedToken = await refreshTokenModel.findOne({ 
+            token: refreshToken, 
+            userId: decoded.userId,  
+            expiresAt : { $gt: new Date() } 
+        });
 
         if (!storedToken) {
-            return res.status(401).json({ success: false, message: "Token not recognized or expired" });
+            return res.status(401).json({ 
+                success: false, 
+                message: "Token not recognized or expired" 
+            });
         }
+
+        // Reuse detection — token exists but is revoked
+        if (storedToken.isRevoked) {
+            // Revoke all tokens for this user as a precaution
+            await refreshTokenModel.updateMany(
+                { userId: decoded.userId },
+                { isRevoked: true }
+            );
+        } 
+
+        return res.status(401).json({
+            success: false,
+            message: "Session invalidated due to suspicious activity, please login again"
+        });
 
         // Check if user exists
         const user = await userModel.findById(decoded.userId);
@@ -64,15 +85,28 @@ export const refreshTokenController = async (req, res) => {
             return res.status(401).json({ success: false, message: "User not found" });
         }
 
-        // Generate new access token
+        // Revoke the old refresh token
+        storedToken.isRevoked = true;
+        await storedToken.save();
+
+        // Generate both token
         const newAccessToken = generateAccessToken(user);
+        const newRefreshToken = generateRefreshToken(user);
+
+        // Save the new refresh token in DB
+        await refreshTokenModel.create({
+            userId: user._id,
+            token: newRefreshToken,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        });
 
         res.cookie('accessToken', newAccessToken, accessCookieOptions);
+        res.cookie('refreshToken', newRefreshToken, refreshCookieOptions);
 
         return res.status(200).json({
             success: true,
-            message: "Token refreshed successfully"
-        });
+            message: "Token refreshed successfully",
+        })
 
     } catch (error) {
         return res.status(500).json({
@@ -95,6 +129,17 @@ export const registerUser = async (req, res) => {
                 message: "Email already in use"
             });
         }
+
+        // Generate OTP for account verification and save to DB with expiry for development testing (in production, you would send this OTP to the user's email)
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpire = Date.now() + 10 * 60 * 1000; 
+
+        user.verifyOTP = otp;
+        user.verifyOTPExpire = otpExpire;
+        await user.save();
+
+        console.log(`[DEV] Account verification OTP for ${email}: ${otp}`);
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -158,6 +203,13 @@ export const loginUser = async (req, res) => {
             });
         }
 
+        if (!user.isAccountVerified) {
+            return res.status(403).json({
+                success: false,
+                message: "Please verify your email before logging in"
+            });
+        }
+
         // Generate tokens
         const accessToken = generateAccessToken(user);
         const refreshToken = generateRefreshToken(user);
@@ -185,6 +237,239 @@ export const loginUser = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Server error during login"
+        });
+    }
+};
+
+export const forgotPassword = async (req, res) => {
+    try {
+
+        // 1) check if user with email exists
+        const { email } =req.body;
+        const user = await userModel.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User with this email does not exist try again with a valid email"
+            })
+        }
+
+        // 2) Generate OTP and save to DB with expiry
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpire = Date.now() + 10 * 60 * 1000; // OTP valid for 10 minutes
+
+        user.resetOTPExpire = otpExpire;
+        user.resetOTP = otp;
+
+        await user.save();
+
+        // 3) Send OTP to user's email (simulate by logging to console fo development)
+        console.log(`[DEV] Password reset OTP for ${email}: ${otp}`);
+
+        return res.status(200).json({
+            success: true,
+            message: "If this email exists, an OTP has been sent"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Server error during forgot password"
+        })
+    }
+
+}
+
+export const resetPassword = async (req, res) => {
+    try {
+        // 1) Validate email, OTP, and new password
+        const { email, otp, password } = req.body;
+        const user = await userModel.findOne({ email });
+
+        if (!user || user.resetOTP !== otp || !user.resetOTPExpire) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or expired OTP"
+            });
+        }
+
+        // Check if OTP is expired
+        if (Date.now() > user.resetOTPExpire) {
+            user.resetOTP = null;
+            user.resetOTPExpire = 0;
+            await user.save();
+
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or expired OTP"
+            });
+        }
+
+        // Verify OTP
+        if (user.resetOTP !== otp) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or expired OTP"
+            });
+        }
+
+
+        // 2) Hash new password and update user record
+        const hashedPassword = await bcrypt.hash(password, 10);
+        user.password = hashedPassword;
+        user.resetOTP = null;
+        user.resetOTPExpire = 0;
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Password reset successful"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Server error during reset password"
+        })
+    }
+}
+
+export const verifyEmail = async (req, res) => {
+
+    // 1) Validate email and OTP, check if OTP is correct and not expired, then mark account as verified
+    try {
+        const { email, otp } = req.body;
+
+        const user = await userModel.findOne({ email });
+
+        if (!user || !user.verifyOTP || !user.verifyOTPExpire) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or expired OTP"
+            });
+        }
+
+        // Check expiry
+        if (Date.now() > user.verifyOTPExpire) {
+            user.verifyOTP = null;
+            user.verifyOTPExpire = 0;
+            await user.save();
+
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or expired OTP"
+            });
+        }
+
+        // Verify OTP
+        if (user.verifyOTP !== otp) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or expired OTP"
+            });
+        }
+
+        // Mark account as verified
+
+        user.isAccountVerified = true;
+        user.verifyOTP = null;
+        user.verifyOTPExpire = 0;
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Email verified successfully"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Server error during email verification"
+        });
+    }
+};
+
+export const resendOTP = async (req, res) => {
+
+    // Resends verification OTP if account is not yet verified
+    try {
+        const { email } = req.body;
+
+        const user = await userModel.findOne({ email });
+
+        if (!user) {
+            return res.status(200).json({
+                success: true,
+                message: "If this email exists, a new OTP has been sent"
+            });
+        }
+
+        // Account already verified
+        if (user.isAccountVerified) {
+            return res.status(400).json({
+                success: false,
+                message: "Account is already verified"
+            });
+        }
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpire = Date.now() + 10 * 60 * 1000;
+
+        // Save new OTP to DB
+        user.verifyOTP = otp;
+        user.verifyOTPExpire = otpExpire;
+        await user.save();
+
+        console.log(`[DEV] Resend verify OTP for ${email}: ${otp}`);
+
+        return res.status(200).json({
+            success: true,
+            message: "If this email exists, a new OTP has been sent"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Server error during OTP resend"
+        });
+    }
+};
+
+// Allows authenticated user to change their password
+export const changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        const user = await userModel.findById(req.user.userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        // Verify current password
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) {
+            return res.status(401).json({
+                success: false,
+                message: "Current password is incorrect"
+            });
+        }
+
+        user.password = await bcrypt.hash(newPassword, 10);
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Password changed successfully"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Server error during password change"
         });
     }
 };

@@ -47,3 +47,14 @@ export const authLimiter = rateLimit({
         message: "Too many login attempts, try again after 15 minutes"
     }
 });
+
+export const resetPasswordLimiter = rateLimit({
+    windowMs: 30 * 60 * 1000, // 0.5 hour
+    max: 5, // max 5 password reset attempts
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: "Too many password reset attempts, try again after an half hour"
+    }
+});
